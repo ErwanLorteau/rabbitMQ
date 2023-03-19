@@ -16,36 +16,36 @@ public class PingPong {
     /**Arguments**/
     //Queues for exchanges
     private final static String QUEUE_NAME = "ping_pong_queue"; //for ping/pong
-    private final static String ID_EXCHANGE_NAME = "id_exchange"; //for ids
+    private final static String ID_EXCHANGE_NAME = "id_exchange"; //for ids sharing
     private final static String PING_COMMAND = "ping";
 
-    private static boolean pingStarted = false;
+    private static boolean pingStarted = false; //to say if the node is busy
     private static int exchangesLeft = 0;
     private static Object lock = new Object();
-    private static int nodeId;
-    private static Set<Integer> nodeIds = new HashSet<>();
+    private static int nodeId; //our id
+    private static Set<Integer> nodeIds = new HashSet<>(); //to know nodes id
 
     public static void main(String[] argv) throws Exception {
+
+        //Setup the queues
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost("localhost");
         Connection connection = factory.newConnection();
         Channel channel = connection.createChannel();
-
         channel.queueDeclare(QUEUE_NAME, false, false, false, null);
 
+        //Define our id
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         System.out.print("Enter a node ID: ");
         nodeId = Integer.parseInt(reader.readLine());
         System.out.println("Node ID set to " + nodeId);
 
-        // Declare ID exchange
+        // Declare our id to all other nodes
         channel.exchangeDeclare(ID_EXCHANGE_NAME, "fanout");
-
-        // Broadcast node ID to all nodes
         String messageId = Integer.toString(nodeId);
         channel.basicPublish(ID_EXCHANGE_NAME, "", null, messageId.getBytes("UTF-8"));
 
-        // Wait for responses to determine if ID is unique
+        //Make sur it's unique
         Consumer consumerId = new DefaultConsumer(channel) {
             @Override
             public void handleDelivery(String consumerTag, Envelope envelope, com.rabbitmq.client.AMQP.BasicProperties properties, byte[] body) throws IOException {
@@ -55,6 +55,7 @@ public class PingPong {
                 }
             }
         };
+
         String replyQueueName1 = channel.queueDeclare().getQueue();
         channel.basicConsume(replyQueueName1, true, consumerId);
         channel.queueBind(replyQueueName1, ID_EXCHANGE_NAME, "");
@@ -64,20 +65,24 @@ public class PingPong {
             nodeId = Integer.parseInt(reader.readLine());
         }
         System.out.println("Node ID set to " + nodeId);
-
-        // Add node ID to set of used IDs
         nodeIds.add(nodeId);
 
+
+        //CLI to send messages
         while (true) {
             System.out.println("Enter a command:");
             String input = reader.readLine();
             String[] tokens = input.split(" ");
             if (tokens.length == 3 && tokens[0].equals(PING_COMMAND)) {
                 int destNodeId = Integer.parseInt(tokens[1]);
+
+                //verify we dont ping ourself
                 if (destNodeId == nodeId) {
                     System.out.println("Cannot ping self");
                     continue;
                 }
+
+                //otherwise, perform the send request
                 int numExchanges = Integer.parseInt(tokens[2]);
                 synchronized(lock) {
                                     if (pingStarted) {
